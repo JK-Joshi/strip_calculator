@@ -430,9 +430,22 @@ function UnifiedCalculator() {
 
   // Delete entry from history
   const handleDeleteFromHistory = (id) => {
-    setHistory(prev => prev.filter(entry => entry.id !== id));
+    setHistory(prev => {
+      // Remove the area with the given entry id from the correct customer
+      const updated = prev
+        .map(customer => ({
+          ...customer,
+          areas: customer.areas.filter(a => a.entry.id !== id)
+        }))
+        .filter(customer => customer.areas.length > 0); // Remove customers with no areas
+      saveHistoryToLocalStorage(updated);
+      return updated;
+    });
     setConfirmDeleteDialogOpen(false);
     setEntryToDelete(null);
+    setSnackbarOpen(true);
+    setSnackbarMessage('Deleted!');
+    setSnackbarSeverity('success');
   };
 
   // Open delete confirmation dialog
