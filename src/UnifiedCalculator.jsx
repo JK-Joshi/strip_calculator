@@ -24,7 +24,12 @@ import {
   Fab,
   Button as MUIButton,
   Snackbar,
-  Alert
+  Alert,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  DialogContentText,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import HistoryIcon from '@mui/icons-material/History';
@@ -124,6 +129,9 @@ function UnifiedCalculator() {
   const [history, setHistory] = useState([]);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [confirmClearDialogOpen, setConfirmClearDialogOpen] = useState(false);
+  const [confirmDeleteDialogOpen, setConfirmDeleteDialogOpen] = useState(false);
+  const [entryToDelete, setEntryToDelete] = useState(null);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -326,6 +334,14 @@ function UnifiedCalculator() {
   // Delete entry from history
   const handleDeleteFromHistory = (id) => {
     setHistory(prev => prev.filter(entry => entry.id !== id));
+    setConfirmDeleteDialogOpen(false);
+    setEntryToDelete(null);
+  };
+
+  // Open delete confirmation dialog
+  const handleDeleteClick = (entry) => {
+    setEntryToDelete(entry);
+    setConfirmDeleteDialogOpen(true);
   };
 
   // Clear all history
@@ -338,6 +354,7 @@ function UnifiedCalculator() {
     } catch (error) {
       console.error('Error clearing history from localStorage:', error);
     }
+    setConfirmClearDialogOpen(false);
   };
 
   // Reset all fields
@@ -1187,7 +1204,7 @@ function UnifiedCalculator() {
                         edge="end"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleDeleteFromHistory(entry.id);
+                          handleDeleteClick(entry);
                         }}
                         sx={{ color: 'error.main' }}
                         title="Delete"
@@ -1223,7 +1240,7 @@ function UnifiedCalculator() {
               <Button
                 variant="outlined"
                 color="error"
-                onClick={handleClearHistory}
+                onClick={() => setConfirmClearDialogOpen(true)}
                 fullWidth
                 sx={{ 
                   py: 1.5,
@@ -1241,12 +1258,76 @@ function UnifiedCalculator() {
         open={snackbarOpen}
         autoHideDuration={2000}
         onClose={() => setSnackbarOpen(false)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
-        <Alert onClose={() => setSnackbarOpen(false)} severity="success" sx={{ width: '100%' }}>
+        <Alert 
+          onClose={() => setSnackbarOpen(false)} 
+          severity="success" 
+          sx={{ 
+            width: '100%',
+            bgcolor: 'success.dark',
+            color: 'white',
+            '& .MuiAlert-icon': {
+              color: 'white'
+            },
+            '& .MuiAlert-action': {
+              color: 'white'
+            }
+          }}
+        >
           Saved!
         </Alert>
       </Snackbar>
+
+      {/* Confirm Clear History Dialog */}
+      <Dialog
+        open={confirmClearDialogOpen}
+        onClose={() => setConfirmClearDialogOpen(false)}
+        aria-labelledby="confirm-clear-dialog-title"
+        aria-describedby="confirm-clear-dialog-description"
+      >
+        <DialogTitle id="confirm-clear-dialog-title">Confirm Clear History</DialogTitle>
+        <DialogContent>
+          <DialogContentText id="confirm-clear-dialog-description">
+            Are you sure you want to clear all your calculation history? This action cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmClearDialogOpen(false)} color="primary">
+            Cancel
+          </Button>
+          <Button onClick={handleClearHistory} color="error" variant="contained">
+            Clear History
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Confirm Delete History Entry Dialog */}
+      <Dialog
+        open={confirmDeleteDialogOpen}
+        onClose={() => setConfirmDeleteDialogOpen(false)}
+        aria-labelledby="confirm-delete-dialog-title"
+        aria-describedby="confirm-delete-dialog-description"
+      >
+        <DialogTitle id="confirm-delete-dialog-title">Confirm Delete</DialogTitle>
+        <DialogContent>
+          <DialogContentText id="confirm-delete-dialog-description">
+            Are you sure you want to delete this calculation from your history? This action cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDeleteDialogOpen(false)} color="primary">
+            Cancel
+          </Button>
+          <Button onClick={() => {
+            if (entryToDelete) {
+              handleDeleteFromHistory(entryToDelete.id);
+            }
+          }} color="error" variant="contained">
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
     </>
   );
 }
