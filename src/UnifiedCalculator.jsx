@@ -30,6 +30,7 @@ import {
   DialogContent,
   DialogActions,
   DialogContentText,
+  Autocomplete,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import HistoryIcon from '@mui/icons-material/History';
@@ -120,6 +121,69 @@ const INITIAL_CUSTOMER_STATE = {
   area: ''
 };
 
+// Utility: Find or create customer in history
+function upsertCustomerHistory(history, customerName, area, entry) {
+  // Find customer
+  let customer = history.find(c => c.customerName === customerName);
+  if (!customer) {
+    // New customer
+    return [
+      ...history,
+      {
+        customerName,
+        areas: [
+          { area, entry }
+        ]
+      }
+    ];
+  } else {
+    // Customer exists, check for area
+    let areaIdx = customer.areas.findIndex(a => a.area === area);
+    if (areaIdx === -1) {
+      // New area for this customer
+      return history.map(c =>
+        c.customerName === customerName
+          ? { ...c, areas: [...c.areas, { area, entry }] }
+          : c
+      );
+    } else {
+      // Update existing area entry
+      return history.map(c =>
+        c.customerName === customerName
+          ? {
+              ...c,
+              areas: c.areas.map((a, idx) =>
+                idx === areaIdx ? { area, entry } : a
+              )
+            }
+          : c
+      );
+    }
+  }
+}
+
+// Utility: Migrate flat history to grouped structure
+function migrateHistory(data) {
+  if (!Array.isArray(data)) return [];
+  // If already grouped (has customerName and areas), return as is
+  if (data.length > 0 && data[0].customerName && Array.isArray(data[0].areas)) {
+    return data;
+  }
+  // Otherwise, group by customerName and area
+  const grouped = [];
+  data.forEach(entry => {
+    const customerName = entry.customerName || '';
+    const area = entry.area || '';
+    let customer = grouped.find(c => c.customerName === customerName);
+    if (!customer) {
+      customer = { customerName, areas: [] };
+      grouped.push(customer);
+    }
+    customer.areas.push({ area, entry });
+  });
+  return grouped;
+}
+
 function UnifiedCalculator() {
   const [converterValues, setConverterValues] = useState(INITIAL_CONVERTER_STATE);
   const [driverValues, setDriverValues] = useState(INITIAL_DRIVER_STATE);
@@ -130,6 +194,7 @@ function UnifiedCalculator() {
   const [history, setHistory] = useState([]);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('Saved!');
+  const [snackbarSeverity, setSnackbarSeverity] = useState('success');
   const [searchTerm, setSearchTerm] = useState('');
   const [confirmClearDialogOpen, setConfirmClearDialogOpen] = useState(false);
   const [confirmDeleteDialogOpen, setConfirmDeleteDialogOpen] = useState(false);
@@ -139,14 +204,31 @@ function UnifiedCalculator() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
-  // Filter history based on search term
-  const filteredHistory = history.filter(entry => {
-    if (!searchTerm) return true;
-    const searchLower = searchTerm.toLowerCase();
-    const nameMatch = entry.customerName?.toLowerCase().includes(searchLower);
-    const areaMatch = entry.area?.toLowerCase().includes(searchLower);
-    return nameMatch || areaMatch;
-  });
+  // Filter grouped history by customer name or area
+  const filteredHistory = history
+    .map(customer => {
+      // If no search term, include all
+      if (!searchTerm) return customer;
+      const searchLower = searchTerm.toLowerCase();
+      // Check if customer name matches
+      const nameMatch = customer.customerName?.toLowerCase().includes(searchLower);
+      // Filter areas by area name
+      const filteredAreas = (customer.areas || []).filter(a =>
+        a.area?.toLowerCase().includes(searchLower)
+      );
+      if (nameMatch) {
+        // If customer name matches, include all areas
+        return customer;
+      } else if (filteredAreas.length > 0) {
+        // If any area matches, include only those areas
+        return { ...customer, areas: filteredAreas };
+      } else {
+        // No match
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .filter(cust => (cust.areas && cust.areas.length > 0));
 
   // Load history from localStorage on component mount
   useEffect(() => {
@@ -154,8 +236,9 @@ function UnifiedCalculator() {
       const savedHistory = localStorage.getItem('ledCalculatorHistory');
       console.log('Loading history from localStorage:', savedHistory);
       if (savedHistory) {
-        const parsedHistory = JSON.parse(savedHistory);
-        console.log('Parsed history:', parsedHistory);
+        let parsedHistory = JSON.parse(savedHistory);
+        parsedHistory = migrateHistory(parsedHistory);
+        console.log('Parsed/migrated history:', parsedHistory);
         setHistory(parsedHistory);
       } else {
         console.log('No saved history found in localStorage');
@@ -306,18 +389,27 @@ function UnifiedCalculator() {
       results
     };
     
+    // Check if area already exists for this customer
+    const customer = history.find(c => c.customerName === customerValues.customerName);
+    if (customer && customer.areas.some(a => a.area === customerValues.area)) {
+      setSnackbarMessage('Area already added for this customer. You can edit it from history.');
+      setSnackbarSeverity('warning');
+      setSnackbarOpen(true);
+      return;
+    }
+    
     console.log('Saving new entry to history:', newEntry);
     setHistory(prev => {
-      const newHistory = [newEntry, ...prev.slice(0, 19)]; // Keep only last 20 entries
-      console.log('New history state:', newHistory);
+      const updatedHistory = upsertCustomerHistory(prev, customerValues.customerName, customerValues.area, newEntry);
+      console.log('New history state:', updatedHistory);
       // Explicitly save to localStorage immediately
-      saveHistoryToLocalStorage(newHistory);
-      return newHistory;
+      saveHistoryToLocalStorage(updatedHistory);
+      return updatedHistory;
     });
     
     setSnackbarOpen(true);
     setSnackbarMessage('Saved!');
-    
+    setSnackbarSeverity('success');
     // Delay the reset to ensure localStorage is saved first
     setTimeout(() => {
       handleReset();
@@ -385,6 +477,7 @@ function UnifiedCalculator() {
     setOriginalEntry(null);
     setSnackbarOpen(true);
     setSnackbarMessage('Updated!');
+    setSnackbarSeverity('success');
     handleReset();
   };
 
@@ -464,6 +557,11 @@ function UnifiedCalculator() {
       window.open(url, '_blank');
     }
   };
+
+  const [expandedCustomer, setExpandedCustomer] = useState(null);
+
+  // Get all unique customer names from grouped history
+  const customerNameOptions = history.map(c => c.customerName).filter(Boolean);
 
   return (
     <>
@@ -547,40 +645,49 @@ function UnifiedCalculator() {
                 )}
               </Typography>
               
-              <TextField
-                label="Customer Name"
+              <Autocomplete
+                freeSolo
+                options={customerNameOptions}
                 value={customerValues.customerName}
-                onChange={handleCustomerChange('customerName')}
-                fullWidth
-                variant="outlined"
-                size={isMobile ? "small" : "medium"}
-                helperText="Enter customer name"
-                sx={{
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: { xs: 0.5, sm: 2 },
-                    transition: 'all 0.3s ease',
-                    '&:hover': {
-                      '& .MuiOutlinedInput-notchedOutline': {
-                        borderColor: 'primary.main',
-                      },
-                    },
-                    '&.Mui-focused': {
-                      '& .MuiOutlinedInput-notchedOutline': {
-                        borderColor: 'primary.main',
-                        borderWidth: 2,
-                      },
-                    },
-                  },
-                  '& .MuiInputLabel-root': {
-                    color: 'text.secondary',
-                    fontSize: { xs: '0.875rem', sm: '1rem' },
-                  },
-                  '& .MuiFormHelperText-root': {
-                    color: 'text.secondary',
-                    fontSize: { xs: '0.7rem', sm: '0.75rem' },
-                    margin: '4px 0 0 0',
-                  },
+                onInputChange={(e, newValue) => {
+                  setCustomerValues(prev => ({ ...prev, customerName: newValue }));
                 }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Customer Name"
+                    variant="outlined"
+                    size={isMobile ? "small" : "medium"}
+                    helperText="Enter or select customer name"
+                    fullWidth
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        borderRadius: { xs: 0.5, sm: 2 },
+                        transition: 'all 0.3s ease',
+                        '&:hover': {
+                          '& .MuiOutlinedInput-notchedOutline': {
+                            borderColor: 'primary.main',
+                          },
+                        },
+                        '&.Mui-focused': {
+                          '& .MuiOutlinedInput-notchedOutline': {
+                            borderColor: 'primary.main',
+                            borderWidth: 2,
+                          },
+                        },
+                      },
+                      '& .MuiInputLabel-root': {
+                        color: 'text.secondary',
+                        fontSize: { xs: '0.875rem', sm: '1rem' },
+                      },
+                      '& .MuiFormHelperText-root': {
+                        color: 'text.secondary',
+                        fontSize: { xs: '0.7rem', sm: '0.75rem' },
+                        margin: '4px 0 0 0',
+                      },
+                    }}
+                  />
+                )}
               />
 
               <TextField
@@ -1275,75 +1382,106 @@ function UnifiedCalculator() {
               </Box>
             ) : (
               <List sx={{ p: 0 }}>
-                {filteredHistory.map((entry) => (
-                  <ListItem
-                    key={entry.id}
-                    sx={{
-                      border: '1px solid',
-                      borderColor: 'divider',
-                      borderRadius: 1,
-                      mb: 1,
-                      cursor: 'pointer',
-                      '&:hover': {
-                        bgcolor: 'action.hover',
-                      },
-                    }}
-                    onClick={() => handleLoadFromHistory(entry)}
-                  >
-                    <ListItemText
-                      primary={
-                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                            {entry.customerName || 'Unnamed Project'}
-                          </Typography>
-                          {entry.area && (
-                            <Typography variant="body2" color="text.secondary">
-                              {entry.area}
-                            </Typography>
-                          )}
-                          <Typography variant="body2" color="text.secondary">
-                            {entry.converterValues.m} m • {entry.driverValues.powerPerMeter}W/m • {entry.results.driverCount} drivers
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {new Date(entry.timestamp).toLocaleString()}
-                          </Typography>
-                        </Box>
-                      }
-                    />
-                    <ListItemSecondaryAction>
-                      <IconButton
-                        edge="end"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteClick(entry);
-                        }}
-                        sx={{ color: 'error.main' }}
-                        title="Delete"
-                      >
-                        <DeleteIcon />
-                      </IconButton>
-                      <IconButton
-                        edge="end"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleStartEdit(entry);
-                        }}
-                        sx={{ color: 'primary.main', mr: 1 }}
-                        title="Edit"
-                      >
-                        <EditIcon />
-                      </IconButton>
-                      <IconButton
-                        edge="end"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleShareHistoryEntry(entry);
-                        }}
-                      >
-                        <ShareIcon />
-                      </IconButton>
-                    </ListItemSecondaryAction>
-                  </ListItem>
+                {filteredHistory.map((customer, custIdx) => (
+                  <Box key={customer.customerName + custIdx}>
+                    <ListItem
+                      button
+                      onClick={() => {
+                        setExpandedCustomer(expandedCustomer === customer.customerName ? null : customer.customerName);
+                      }}
+                      sx={{
+                        border: '1px solid',
+                        borderColor: 'divider',
+                        borderRadius: 1,
+                        mb: 1,
+                        bgcolor: expandedCustomer === customer.customerName ? 'action.selected' : undefined,
+                        fontWeight: 700,
+                        fontSize: '1.05rem',
+                        cursor: 'pointer',
+                        '&:hover': {
+                          bgcolor: 'action.hover',
+                        },
+                      }}
+                    >
+                      <ListItemText
+                        primary={customer.customerName || 'Unnamed Project'}
+                        secondary={customer.areas.length === 1 ? customer.areas[0].area : `${customer.areas.length} areas`}
+                      />
+                    </ListItem>
+                    {/* Always show area sub-list when expanded, even if only one area */}
+                    {expandedCustomer === customer.customerName && (
+                      <List sx={{ pl: 3, pb: 1 }}>
+                        {customer.areas.map((areaObj, areaIdx) => (
+                          <ListItem
+                            key={areaObj.area + areaIdx}
+                            button
+                            onClick={() => handleLoadFromHistory(areaObj.entry)}
+                            sx={{
+                              border: '1px solid',
+                              borderColor: 'divider',
+                              borderRadius: 1,
+                              mb: 1,
+                              bgcolor: 'background.paper',
+                              fontWeight: 500,
+                              fontSize: '0.98rem',
+                              cursor: 'pointer',
+                              '&:hover': {
+                                bgcolor: 'action.hover',
+                              },
+                            }}
+                          >
+                            <ListItemText
+                              primary={areaObj.area}
+                              secondary={
+                                <>
+                                  <Typography variant="caption" color="text.secondary">
+                                    {areaObj.entry.converterValues.m} m • {areaObj.entry.driverValues.powerPerMeter}W/m • {areaObj.entry.results.driverCount} drivers
+                                  </Typography>
+                                  <br />
+                                  <Typography variant="caption" color="text.secondary">
+                                    {new Date(areaObj.entry.timestamp).toLocaleString()}
+                                  </Typography>
+                                </>
+                              }
+                            />
+                            <ListItemSecondaryAction>
+                              <IconButton
+                                edge="end"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteClick(areaObj.entry);
+                                }}
+                                sx={{ color: 'error.main' }}
+                                title="Delete"
+                              >
+                                <DeleteIcon />
+                              </IconButton>
+                              <IconButton
+                                edge="end"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleStartEdit(areaObj.entry);
+                                }}
+                                sx={{ color: 'primary.main', mr: 1 }}
+                                title="Edit"
+                              >
+                                <EditIcon />
+                              </IconButton>
+                              <IconButton
+                                edge="end"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleShareHistoryEntry(areaObj.entry);
+                                }}
+                              >
+                                <ShareIcon />
+                              </IconButton>
+                            </ListItemSecondaryAction>
+                          </ListItem>
+                        ))}
+                      </List>
+                    )}
+                  </Box>
                 ))}
               </List>
             )}
@@ -1384,10 +1522,10 @@ function UnifiedCalculator() {
       >
         <Alert 
           onClose={() => setSnackbarOpen(false)} 
-          severity="success" 
+          severity={snackbarSeverity}
           sx={{ 
             width: '100%',
-            bgcolor: 'success.dark',
+            bgcolor: snackbarSeverity === 'warning' ? 'warning.dark' : 'success.dark',
             color: 'white',
             '& .MuiAlert-icon': {
               color: 'white'
