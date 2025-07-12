@@ -38,6 +38,7 @@ import ShareIcon from '@mui/icons-material/Share';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SearchIcon from '@mui/icons-material/Search';
+import EditIcon from '@mui/icons-material/Edit';
 
 // Conversion factors for length units
 const LENGTH_CONVERSIONS = {
@@ -128,10 +129,13 @@ function UnifiedCalculator() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState([]);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('Saved!');
   const [searchTerm, setSearchTerm] = useState('');
   const [confirmClearDialogOpen, setConfirmClearDialogOpen] = useState(false);
   const [confirmDeleteDialogOpen, setConfirmDeleteDialogOpen] = useState(false);
   const [entryToDelete, setEntryToDelete] = useState(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [originalEntry, setOriginalEntry] = useState(null);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -312,6 +316,7 @@ function UnifiedCalculator() {
     });
     
     setSnackbarOpen(true);
+    setSnackbarMessage('Saved!');
     
     // Delay the reset to ensure localStorage is saved first
     setTimeout(() => {
@@ -342,6 +347,52 @@ function UnifiedCalculator() {
   const handleDeleteClick = (entry) => {
     setEntryToDelete(entry);
     setConfirmDeleteDialogOpen(true);
+  };
+
+  // Start editing an entry
+  const handleStartEdit = (entry) => {
+    setOriginalEntry(entry);
+    setCustomerValues({
+      customerName: entry.customerName || '',
+      area: entry.area || ''
+    });
+    setConverterValues(entry.converterValues);
+    setDriverValues(entry.driverValues);
+    setResults(entry.results);
+    setIsEditing(true);
+    setHistoryOpen(false);
+  };
+
+  // Save changes to the edited entry
+  const handleSaveChanges = () => {
+    if (!results || !originalEntry) return;
+    
+    const updatedEntry = {
+      ...originalEntry,
+      customerName: customerValues.customerName,
+      area: customerValues.area,
+      converterValues,
+      driverValues,
+      results,
+      lastModified: new Date().toISOString()
+    };
+    
+    setHistory(prev => prev.map(entry => 
+      entry.id === originalEntry.id ? updatedEntry : entry
+    ));
+    
+    setIsEditing(false);
+    setOriginalEntry(null);
+    setSnackbarOpen(true);
+    setSnackbarMessage('Updated!');
+    handleReset();
+  };
+
+  // Cancel editing
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setOriginalEntry(null);
+    handleReset();
   };
 
   // Clear all history
@@ -481,7 +532,19 @@ function UnifiedCalculator() {
                   mb: 1
                 }}
               >
-                Customer Information
+                Customer Information{isEditing && (
+                  <Typography 
+                    component="span" 
+                    variant="body2" 
+                    sx={{ 
+                      color: 'warning.main', 
+                      fontWeight: 500,
+                      ml: 1 
+                    }}
+                  >
+                    (Editing)
+                  </Typography>
+                )}
               </Typography>
               
               <TextField
@@ -1041,6 +1104,53 @@ function UnifiedCalculator() {
             >
               Reset
             </Button>
+            {isEditing ? (
+              <Box sx={{
+                display: 'flex',
+                flexDirection: 'row',
+                gap: 2,
+                width: '100%',
+                mt: 1
+              }}>
+                <Button
+                  variant="contained"
+                  color="success"
+                  startIcon={<SaveIcon />}
+                  onClick={handleSaveChanges}
+                  disabled={!results}
+                  sx={{
+                    flex: 1,
+                    borderRadius: { xs: 0.5, sm: 2 },
+                    px: { xs: 2, sm: 4 },
+                    py: { xs: 0.8, sm: 1.2 },
+                    fontWeight: 600,
+                    fontSize: { xs: '0.875rem', sm: '1rem' },
+                    boxShadow: 2,
+                    textTransform: 'none',
+                    minWidth: 120
+                  }}
+                >
+                  Update
+                </Button>
+                <Button
+                  variant="outlined"
+                  onClick={handleCancelEdit}
+                  sx={{
+                    flex: 1,
+                    borderRadius: { xs: 0.5, sm: 2 },
+                    px: { xs: 2, sm: 4 },
+                    py: { xs: 0.8, sm: 1.2 },
+                    fontWeight: 600,
+                    fontSize: { xs: '0.875rem', sm: '1rem' },
+                    boxShadow: 2,
+                    textTransform: 'none',
+                    minWidth: 120
+                  }}
+                >
+                  Cancel Edit
+                </Button>
+              </Box>
+            ) : (
             <Box sx={{
               display: 'flex',
               flexDirection: 'row',
@@ -1089,6 +1199,7 @@ function UnifiedCalculator() {
                 Share
               </Button>
             </Box>
+            )}
           </Box>
         </CardContent>
       </Card>
@@ -1215,6 +1326,17 @@ function UnifiedCalculator() {
                         edge="end"
                         onClick={(e) => {
                           e.stopPropagation();
+                          handleStartEdit(entry);
+                        }}
+                        sx={{ color: 'primary.main', mr: 1 }}
+                        title="Edit"
+                      >
+                        <EditIcon />
+                      </IconButton>
+                      <IconButton
+                        edge="end"
+                        onClick={(e) => {
+                          e.stopPropagation();
                           handleShareHistoryEntry(entry);
                         }}
                       >
@@ -1275,7 +1397,7 @@ function UnifiedCalculator() {
             }
           }}
         >
-          Saved!
+          {snackbarMessage}
         </Alert>
       </Snackbar>
 
